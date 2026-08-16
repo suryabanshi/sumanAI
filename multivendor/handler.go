@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 )
 
 type Handler struct {
@@ -97,7 +98,9 @@ func (h *Handler) ApproveVendor(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) SuspendVendor(w http.ResponseWriter, r *http.Request) {
 	id, _ := uuid.Parse(r.PathValue("id"))
-	var body struct{ Reason string `json:"reason"` }
+	var body struct {
+		Reason string `json:"reason"`
+	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	if err := h.vendorSvc.Suspend(r.Context(), id, body.Reason); err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())

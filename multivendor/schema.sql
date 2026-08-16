@@ -105,6 +105,7 @@ CREATE TABLE orders (
     tax_total        NUMERIC(12,2) NOT NULL DEFAULT 0,
     discount_total   NUMERIC(12,2) NOT NULL DEFAULT 0,
     total            NUMERIC(12,2) NOT NULL DEFAULT 0,
+    currency         CHAR(3) NOT NULL DEFAULT 'USD',
     coupon_code      TEXT,
     notes            TEXT,
     status           order_status NOT NULL DEFAULT 'pending',
@@ -201,6 +202,25 @@ CREATE TABLE vendor_payouts (
 
 CREATE INDEX idx_payouts_vendor ON vendor_payouts (vendor_id);
 CREATE INDEX idx_payouts_status ON vendor_payouts (status);
+
+-- ──────────────────────────────────────────────
+-- Multi-currency ledger
+-- Every credit is normalized to the base currency (amount) while the original
+-- source_amount/source_currency are retained for audit. Splitting a deposit
+-- (e.g. platform commission vs. vendor net) produces one row per account.
+-- ──────────────────────────────────────────────
+CREATE TABLE ledger_entries (
+    id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    account          TEXT NOT NULL,
+    amount           NUMERIC(14,2) NOT NULL,       -- base currency (USD)
+    source_amount    NUMERIC(14,4) NOT NULL,
+    source_currency  CHAR(3) NOT NULL DEFAULT 'USD',
+    reference        TEXT,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_ledger_account   ON ledger_entries (account);
+CREATE INDEX idx_ledger_reference ON ledger_entries (reference);
 
 -- ──────────────────────────────────────────────
 -- Row-level security (example for Supabase)
