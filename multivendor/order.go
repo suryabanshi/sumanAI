@@ -33,12 +33,22 @@ type Order struct {
 	TaxTotal        decimal.Decimal `json:"tax_total"        db:"tax_total"`
 	DiscountTotal   decimal.Decimal `json:"discount_total"   db:"discount_total"`
 	Total           decimal.Decimal `json:"total"            db:"total"`
+	Currency        string          `json:"currency,omitempty" db:"currency"`
 	CouponCode      string          `json:"coupon_code,omitempty" db:"coupon_code"`
 	Notes           string          `json:"notes,omitempty"  db:"notes"`
 	Status          OrderStatus     `json:"status"           db:"status"`
 	PaymentID       uuid.UUID       `json:"payment_id"       db:"payment_id"`
 	PlacedAt        time.Time       `json:"placed_at"        db:"placed_at"`
 	UpdatedAt       time.Time       `json:"updated_at"       db:"updated_at"`
+}
+
+// SettlementCurrency returns the currency the order is charged and settled in,
+// defaulting to the base currency when unset.
+func (o *Order) SettlementCurrency() string {
+	if o.Currency == "" {
+		return BaseCurrency
+	}
+	return o.Currency
 }
 
 // SubOrder is one vendor's slice of a multi-vendor order.

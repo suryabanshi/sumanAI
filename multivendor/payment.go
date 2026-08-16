@@ -101,16 +101,27 @@ type PaymentService struct {
 	store   PaymentStore
 	gateway PaymentGateway
 	events  EventPublisher
+	ledger  *Ledger
 }
 
 func NewPaymentService(store PaymentStore, gateway PaymentGateway, events EventPublisher) *PaymentService {
 	return &PaymentService{store: store, gateway: gateway, events: events}
 }
 
+// WithLedger attaches a multi-currency ledger. When set, ProcessPayment records
+// the platform/vendor split of every sub-order into the ledger, converting the
+// order's currency to the base currency for uniform tracking. Returns the
+// service for chaining.
+func (s *PaymentService) WithLedger(l *Ledger) *PaymentService {
+	s.ledger = l
+	return s
+}
+
 func (s *PaymentService) ProcessPayment(ctx context.Context, order *Order, token, method string) (*Payment, error) {
+	currency := order.SettlementCurrency()
 	result, err := s.gateway.Charge(ctx, ChargeRequest{
 		Amount:      order.Total,
-		Currency:    "USD",
+		Currency:    currency,
 		Method:      method,
 		Token:       token,
 		Description: "Order " + order.OrderNumber,
@@ -123,7 +134,7 @@ func (s *PaymentService) ProcessPayment(ctx context.Context, order *Order, token
 		OrderID:      order.ID,
 		BuyerID:      order.BuyerID,
 		Amount:       order.Total,
-		Currency:     "USD",
+		Currency:     currency,
 		Method:       method,
 		Status:       PaymentStatusCompleted,
 		GatewayTxnID: result.TransactionID,
@@ -143,16 +154,35 @@ func (s *PaymentService) ProcessPayment(ctx context.Context, order *Order, token
 			GrossAmount:      sub.Subtotal,
 			CommissionAmount: sub.CommissionAmount,
 			NetAmount:        sub.VendorPayout,
-			Currency:         "USD",
+			Currency:         currency,
 			Status:           PayoutStatusPending,
 			CreatedAt:        time.Now(),
 		}
 		if err := s.store.CreatePayout(ctx, po); err != nil {
 			return nil, err
 		}
+		if err := s.recordLedgerSplit(sub, currency); err != nil {
+			return nil, err
+		}
 	}
 	s.events.Publish(EventPaymentCompleted{PaymentID: pay.ID, OrderID: order.ID, Amount: pay.Amount})
 	return pay, nil
+}
+
+// recordLedgerSplit posts a sub-order's platform-commission / vendor-net split
+// to the attached ledger, normalized to the base currency. It is a no-op when
+// no ledger is attached or the sub-order carries no billable total.
+func (s *PaymentService) recordLedgerSplit(sub *SubOrder, currency string) error {
+	if s.ledger == nil || !sub.Total.IsPositive() {
+		return nil
+	}
+	commissionPct := sub.CommissionAmount.Div(sub.Total)
+	split := []SplitRule{
+		{Account: PlatformAccount, Percent: commissionPct},
+		{Account: VendorAccount(sub.VendorID), Percent: decimal.NewFromInt(1).Sub(commissionPct)},
+	}
+	_, err := s.ledger.Deposit(sub.Total, currency, sub.ID.String(), split)
+	return err
 }
 
 // ProcessPayouts is called by a scheduled job (e.g. daily) to settle vendor balances.
